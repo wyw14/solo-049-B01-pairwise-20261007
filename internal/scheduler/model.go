@@ -11,7 +11,13 @@ const (
 	Reserved ReservationStatus = "reserved"
 	Active   ReservationStatus = "active"
 	Released ReservationStatus = "released"
+	Expired  ReservationStatus = "expired"
 )
+
+// Terminal reports whether the reservation can no longer occupy its antenna.
+func (s ReservationStatus) Terminal() bool {
+	return s == Released || s == Expired
+}
 
 type Interval struct {
 	ReservationID string            `json:"reservation_id"`

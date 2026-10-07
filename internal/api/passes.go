@@ -66,14 +66,12 @@ func (r *Runtime) reservePass(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	if !reservation.Start.After(r.Clock.Now()) {
-		if _, err := r.Antennas.Claim(reservation); err != nil {
+		claimed, err := r.Timeline.Claim(reservation.ReservationID, r.Clock.Now())
+		if err != nil {
 			writeError(writer, err)
 			return
 		}
-		if _, err := r.Timeline.Activate(reservation.ReservationID); err != nil {
-			writeError(writer, err)
-			return
-		}
+		reservation = claimed
 	}
 	writeJSON(writer, http.StatusOK, reservation)
 }

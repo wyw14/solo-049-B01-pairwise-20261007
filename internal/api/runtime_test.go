@@ -124,6 +124,49 @@ func TestRouterRejectsOverlappingReservation(t *testing.T) {
 	}
 }
 
+func TestReservationReleaseAndExpiryFreeAntennaOwnership(t *testing.T) {
+	runtime := newTestRuntime(t)
+	first := runtime.Passes.List()[0]
+	now := runtime.Clock.Now()
+	state, found := runtime.Antennas.State(first.AntennaID)
+	if !found || state.OwnerPassID != first.ID {
+		// Seeded pass claims its antenna through the timeline boundary.
+		t.Fatalf("seeded antenna owner = %#v, want pass %s", state, first.ID)
+	}
+
+	if _, err := runtime.Timeline.Release(first.ReservationID); err != nil {
+		t.Fatal(err)
+	}
+	state, _ = runtime.Antennas.State(first.AntennaID)
+	if state.OwnerPassID != "" {
+		t.Fatalf("released reservation still owns antenna: %s", state.OwnerPassID)
+	}
+	if _, err := runtime.Timeline.Claim(first.ReservationID, now); err == nil {
+		t.Fatal("released reservation re-claimed the antenna")
+	}
+
+	second, err := runtime.Passes.Create(passsvc.CreateRequest{SatelliteID: "SAT-C07", AntennaID: "ANT-02", RFChains: []string{"RF-03"}, RequiredReceiverChains: []string{"RF-03"}, AOS: now.Add(-2 * time.Minute), LOS: now.Add(-time.Minute), Revision: 1, OwnerStation: "north"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.WindowRecompute.Apply(second.ID, second.Window); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := runtime.Reservations.ReservePass(second.ID, second.AntennaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Timeline.Claim(reservation.ReservationID, now); err == nil {
+		t.Fatal("reservation past its window end claimed the antenna")
+	}
+	if state, _ := runtime.Antennas.State("ANT-02"); state.OwnerPassID != "" {
+		t.Fatalf("expired reservation occupied ANT-02: %s", state.OwnerPassID)
+	}
+	if swept := runtime.Timeline.ExpireDue(now); len(swept) != 1 || swept[0].ReservationID != reservation.ReservationID {
+		t.Fatalf("expiry sweep returned %#v", swept)
+	}
+}
+
 func newTestRuntime(t *testing.T) *Runtime {
 	t.Helper()
 	runtime, err := NewRuntime(t.TempDir())

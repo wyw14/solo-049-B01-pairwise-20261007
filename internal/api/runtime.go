@@ -84,10 +84,11 @@ func NewRuntime(stateRoot string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	fleet, err := antenna.NewFleet(paths, timeline, trail, []string{"ANT-01", "ANT-02", "ANT-03"})
+	fleet, err := antenna.NewFleet(paths, trail, []string{"ANT-01", "ANT-02", "ANT-03"})
 	if err != nil {
 		return nil, err
 	}
+	timeline.RegisterOwnership(fleet)
 	rfController, err := rf.NewController(paths, trail, []string{"RF-01", "RF-02", "RF-03"})
 	if err != nil {
 		return nil, err
@@ -206,7 +207,7 @@ func (r *Runtime) seed() error {
 		if err := r.Passes.SetReservation(value.ID, reservation.ReservationID, reservation.Generation); err != nil {
 			return err
 		}
-		if _, err := r.Antennas.Claim(reservation); err != nil {
+		if _, err := r.Timeline.Claim(reservation.ReservationID, now); err != nil {
 			return err
 		}
 		if err := r.Deadlines.Schedule(value); err != nil {
