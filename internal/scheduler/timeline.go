@@ -118,6 +118,29 @@ func (t *Timeline) setStatus(reservationID string, status ReservationStatus) (In
 	return updated, nil
 }
 
+// Claimable verifies that a reservation is still committed and usable at the
+// moment antenna ownership is claimed: it must exist, not be released, match
+// the claimed generation, and not be expired. The returned Interval is the
+// committed record, which is authoritative over any caller-held copy.
+func (t *Timeline) Claimable(reservationID string, generation int64, at time.Time) (Interval, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	_, _, current, found := t.findLocked(reservationID)
+	if !found {
+		return Interval{}, fmt.Errorf("reservation %s not found", reservationID)
+	}
+	if current.Status == Released {
+		return Interval{}, fmt.Errorf("reservation %s is released", reservationID)
+	}
+	if current.Generation != generation {
+		return Interval{}, fmt.Errorf("reservation %s generation changed", reservationID)
+	}
+	if !current.End.After(at) {
+		return Interval{}, fmt.Errorf("reservation %s expired", reservationID)
+	}
+	return current, nil
+}
+
 func (t *Timeline) List(antennaID string) []Interval {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

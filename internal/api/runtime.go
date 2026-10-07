@@ -88,6 +88,7 @@ func NewRuntime(stateRoot string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	fleet.SetClock(clockService.Now)
 	rfController, err := rf.NewController(paths, trail, []string{"RF-01", "RF-02", "RF-03"})
 	if err != nil {
 		return nil, err

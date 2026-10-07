@@ -3,6 +3,7 @@ package antenna
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"orbitlink/internal/audit"
 	"orbitlink/internal/scheduler"
@@ -15,10 +16,11 @@ type Fleet struct {
 	states   map[string]State
 	timeline *scheduler.Timeline
 	audit    *audit.Trail
+	now      func() time.Time
 }
 
 func NewFleet(paths store.Paths, timeline *scheduler.Timeline, trail *audit.Trail, ids []string) (*Fleet, error) {
-	fleet := &Fleet{path: paths.Snapshot("antennas"), states: make(map[string]State), timeline: timeline, audit: trail}
+	fleet := &Fleet{path: paths.Snapshot("antennas"), states: make(map[string]State), timeline: timeline, audit: trail, now: func() time.Time { return time.Now().UTC() }}
 	var states []State
 	found, err := store.ReadJSON(fleet.path, &states)
 	if err != nil {
@@ -40,18 +42,33 @@ func NewFleet(paths store.Paths, timeline *scheduler.Timeline, trail *audit.Trai
 	return fleet, nil
 }
 
+// SetClock overrides the time source used to reject expired reservations.
+func (f *Fleet) SetClock(now func() time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.now = now
+}
+
+// Claim commits antenna ownership for a reservation. The reservation is
+// re-validated against the timeline at the commit boundary: released,
+// expired, or superseded reservations cannot take ownership, and the
+// committed timeline record (not the caller's copy) defines the owner.
 func (f *Fleet) Claim(reservation scheduler.Interval) (State, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	state, found := f.states[reservation.AntennaID]
-	if !found {
-		return State{}, fmt.Errorf("antenna %s not found", reservation.AntennaID)
+	committed, err := f.timeline.Claimable(reservation.ReservationID, reservation.Generation, f.now())
+	if err != nil {
+		return State{}, err
 	}
-	if state.OwnerPassID != "" && state.OwnerPassID != reservation.PassID {
+	state, found := f.states[committed.AntennaID]
+	if !found {
+		return State{}, fmt.Errorf("antenna %s not found", committed.AntennaID)
+	}
+	if state.OwnerPassID != "" && state.OwnerPassID != committed.PassID {
 		return State{}, fmt.Errorf("antenna %s is owned by pass %s", state.ID, state.OwnerPassID)
 	}
-	state.OwnerPassID = reservation.PassID
-	state.OwnerGeneration = reservation.Generation
+	state.OwnerPassID = committed.PassID
+	state.OwnerGeneration = committed.Generation
 	f.states[state.ID] = state
 	if err := f.flushLocked(); err != nil {
 		return State{}, err
